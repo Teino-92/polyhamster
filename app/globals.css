@@ -45,6 +45,7 @@ input:focus { outline: 1px solid var(--gold); }
 .lang { display: flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
 .lang button { background: none; border: 0; padding: 6px 10px; color: var(--muted); }
 .lang button.on { background: var(--text); color: #17171b; }
+.warn { margin: -8px 0 16px; padding: 8px 12px; border: 1px solid var(--coral); border-radius: 4px; color: var(--coral); }
 .tagline { color: var(--text); margin: 10px 0 18px; max-width: 760px; }
 
 /* live board */

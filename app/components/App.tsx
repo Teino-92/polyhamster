@@ -29,6 +29,8 @@ export default function App() {
   const [tab, setTab] = useState(1);
   const [now, setNow] = useState(Date.now());
   const [toast, setToast] = useState<{ text: string; kind: "ok" | "err" } | null>(null);
+  const [live, setLive] = useState<{ status: Status; at: number } | null>(null); // last fresh wheel status
+  const [stateFailed, setStateFailed] = useState(false);
 
   useEffect(() => {
     const l = store.get(LANG_KEY);
@@ -36,12 +38,12 @@ export default function App() {
     setToken(store.get(TOKEN_KEY));
   }, []);
 
+  // Game state (Supabase) and wheel status (Squeekchain) are loaded independently: one failing never freezes the other.
   const loadState = useCallback(async () => {
-    try {
-      const [s, live] = await Promise.all([api.state<State>(), liveFromSqueek()]);
-      if (live) s.status = live; // real time when the browser can reach Squeekchain, else the 1-min copy in the DB
-      setState(s);
-    } catch { /* keep last state */ }
+    const [s, l] = await Promise.allSettled([api.state<State>(), liveFromSqueek()]);
+    if (s.status === "fulfilled") { setState(s.value); setStateFailed(false); } else setStateFailed(true);
+    if (l.status === "fulfilled" && l.value) setLive({ status: l.value, at: Date.now() });
+    else if (s.status === "fulfilled" && s.value.status?.ok) setLive({ status: s.value.status, at: Date.now() }); // 1-min copy kept by the keeper
   }, []);
   const loadMe = useCallback(() => {
     if (!token) return setMe(null);
@@ -57,6 +59,7 @@ export default function App() {
 
   const say = (text: string, kind: "ok" | "err" = "ok") => setToast({ text, kind });
   const switchLang = (l: Lang) => { setLang(l); store.set(LANG_KEY, l); };
+  useEffect(() => { document.documentElement.lang = lang; }, [lang]);
 
   const act = async (run: (token: string) => Promise<unknown>, okText: string) => {
     if (!token) { document.getElementById("join")?.scrollIntoView({ behavior: "smooth" }); return false; }
@@ -68,7 +71,10 @@ export default function App() {
     } catch (e) { say(errText(lang, (e as Error).message), "err"); return false; }
   };
 
-  const status = state?.status;
+  // A status older than 90 s is shown as unavailable, never as LIVE.
+  const status: Status | undefined = live
+    ? now - live.at < 90_000 ? live.status : { ...live.status, ok: false, spinning: false }
+    : state ? { ...(state.status ?? ({} as Status)), ok: false, spinning: false } : undefined;
   const tonight = state?.nights[1];
 
   return (
@@ -84,13 +90,14 @@ export default function App() {
         </div>
       </header>
       <p className="tagline">{t(lang, "tagline")} <span className="muted">{t(lang, "points")}</span></p>
+      {stateFailed && <p className="warn">{t(lang, "stale")}</p>}
 
       <section className={`board ${status?.spinning ? "is-spinning" : "is-idle"}`}>
         <div className="board-main">
           <div className="board-label"><span className={`led ${status?.ok ? (status.spinning ? "led-on" : "led-idle") : "led-off"}`} />{t(lang, "live")}</div>
           {status?.spinning
             ? <DotText text={`${status.rpm} RPM`} size={9} color="var(--gold)" className="big" />
-            : <DotText text={status ? t(lang, "sleeping") : "..."} size={9} color="var(--blue)" className="big" />}
+            : <DotText text={!status ? "..." : status.ok ? t(lang, "sleeping") : "---"} size={9} color={status?.ok ? "var(--blue)" : "var(--muted)"} className="big" />}
           <p className="board-sub">{!status ? "…" : !status.ok ? t(lang, "offline") : status.spinning ? t(lang, "spinningTxt") : t(lang, "sleepingTxt")}</p>
         </div>
         <div className="board-stats">
